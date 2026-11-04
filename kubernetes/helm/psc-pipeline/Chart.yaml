@@ -1,0 +1,11 @@
+apiVersion: v2
+name: psc-pipeline
+description: Runs the Persons with Significant Control pipeline every week and deploys PostgreSQL to store the results.
+type: application
+version: 0.1.0
+appVersion: "latest"
+dependencies:
+  - name: postgres
+    version: 1.1.8
+    repository: https://groundhog2k.github.io/helm-charts/
+    condition: postgres.enabled
