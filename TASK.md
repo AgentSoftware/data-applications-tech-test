@@ -66,6 +66,7 @@ What we need:
 3. The pipeline checks the data. Bad data must not reach the output without anyone knowing, and you must be able to tell us what the checks found.
 4. Tests for the parts of your code that matter.
 5. Python and/or SQL. Everything else is your choice.
+6. **You do not need to build the API** or the endpoint, just produce the data the API would use.
 
 Everything else is up to you to decide: for example, what counts as a person, and what to do when a company chain can't be followed. Make a sensible call and say why.
 
