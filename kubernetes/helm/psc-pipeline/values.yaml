@@ -1,0 +1,114 @@
+# Default values for psc-pipeline.
+# The chart runs the PSC pipeline as a weekly CronJob and deploys PostgreSQL to store the results.
+
+nameOverride: ""
+fullnameOverride: ""
+
+image:
+  # -- The pipeline image. Build it from the root of the repository.
+  repository: psc-pipeline
+  tag: latest
+  pullPolicy: Always
+
+# -- Secrets for a private image registry.
+imagePullSecrets: []
+
+# -- Runs every Friday at midnight, after Companies House publishes the new snapshot.
+schedule: "0 0 * * 5"
+
+pipeline:
+  command: ["python", "-m", "psc_pipeline"]
+  args:
+    - --input
+    - /data/persons-with-significant-control-snapshot-2026-10-29.txt
+  # -- Set to true to check the data without writing to the database.
+  dryRun: false
+  # -- Log level for the pipeline: DEBUG, INFO, WARNING or ERROR.
+  logLevel: INFO
+  # -- The Companies House snapshot to download before each run.
+  sourceUrl: https://download.companieshouse.gov.uk/persons-with-significant-control-snapshot-2026-10-29.zip
+
+job:
+  # -- Retry up to 10 times, so that a temporary failure does not stop the weekly load.
+  backoffLimit: 10
+  concurrencyPolicy: Allow
+  # -- How many finished jobs Kubernetes keeps.
+  successfulJobsHistoryLimit: 3
+  failedJobsHistoryLimit: 3
+
+serviceAccount:
+  # -- Create a service account for the pipeline.
+  create: true
+  annotations: {}
+  # -- The name of the service account. If not set and create is true, a name is generated from the fullname.
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+
+securityContext:
+  # -- The pipeline needs these permissions to write the snapshot to the data volume.
+  privileged: true
+  runAsUser: 0
+
+resources: {}
+  # We usually recommend not to specify default resources and to leave this as a conscious
+  # choice for the user. This also increases chances charts run on environments with little
+  # resources, such as Minikube. If you do want to specify resources, uncomment the following
+  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
+  # limits:
+  #   cpu: 100m
+  #   memory: 128Mi
+  # requests:
+  #   cpu: 100m
+  #   memory: 128Mi
+
+persistence:
+  enabled: true
+  accessModes:
+    - ReadWriteOnce
+  size: 50Gi
+  storageClass: ""
+
+replicaCount: 1
+
+service:
+  type: ClusterIP
+  port: 80
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: chart-example.local
+      paths:
+        - path: /
+          pathType: ImplementationSpecific
+  tls: []
+
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 100
+  targetCPUUtilizationPercentage: 80
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+postgres:
+  # -- Deploy PostgreSQL as part of this chart.
+  enabled: true
+  auth:
+    postgresPassword: postgres
+    username: psc
+    password: psc-password-123
+    database: psc
+  primary:
+    persistence:
+      # -- The pipeline rebuilds the tables on every run, so the database does not need a volume.
+      enabled: false
