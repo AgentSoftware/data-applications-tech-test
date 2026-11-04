@@ -1,0 +1,87 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: {{ include "psc-pipeline.fullname" . }}
+  labels:
+    {{- include "psc-pipeline.labels" . | nindent 4 }}
+spec:
+  schedule: {{ .Values.schedule | quote }}
+  concurrencyPolicy: {{ .Values.job.concurrencyPolicy }}
+  successfulJobsHistoryLimit: {{ .Values.job.successfulJobsHistoryLimit }}
+  failedJobsHistoryLimit: {{ .Values.job.failedJobsHistoryLimit }}
+  jobTemplate:
+    spec:
+      backoffLimit: {{ .Values.job.backoffLimit }}
+      template:
+        metadata:
+          {{- with .Values.podAnnotations }}
+          annotations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          labels:
+            {{- include "psc-pipeline.labels" . | nindent 12 }}
+        spec:
+          serviceAccountName: {{ include "psc-pipeline.serviceAccountName" . }}
+          restartPolicy: OnFailure
+          {{- with .Values.imagePullSecrets }}
+          imagePullSecrets:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          securityContext:
+            {{- toYaml .Values.podSecurityContext | nindent 12 }}
+          initContainers:
+            # Download and unzip the latest snapshot before the pipeline starts.
+            - name: download-snapshot
+              image: busybox:latest
+              command:
+                - sh
+                - -c
+                - >-
+                  wget -O /data/snapshot.zip {{ .Values.pipeline.sourceUrl }} &&
+                  unzip /data/snapshot.zip -d /data
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+            # Wait until PostgreSQL accepts connections before the pipeline starts.
+            - name: wait-for-postgres
+              image: busybox:latest
+              command: ["sh", "-c", "until nc -z postgres 5432; do echo waiting for postgres; sleep 2; done"]
+          containers:
+            - name: pipeline
+              image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+              imagePullPolicy: {{ .Values.image.pullPolicy }}
+              command: {{ toJson .Values.pipeline.command }}
+              args: {{ toJson .Values.pipeline.args }}
+              envFrom:
+                - configMapRef:
+                    name: {{ include "psc-pipeline.fullname" . }}-config
+              env:
+                - name: PSC_DRY_RUN
+                  value: {{ .Values.pipeline.dryRun }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
+              resources:
+                {{- toYaml .Values.resources | nindent 16 }}
+              volumeMounts:
+                - name: data
+                  mountPath: /data
+          volumes:
+            - name: data
+              {{- if .Values.persistence.enabled }}
+              persistentVolumeClaim:
+                claimName: {{ include "psc-pipeline.fullname" . }}-data
+              {{- else }}
+              emptyDir: {}
+              {{- end }}
+          {{- with .Values.nodeSelector }}
+          nodeSelector:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.affinity }}
+          affinity:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          {{- with .Values.tolerations }}
+          tolerations:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}

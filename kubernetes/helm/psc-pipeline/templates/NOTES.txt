@@ -1,0 +1,12 @@
+The PSC pipeline is installed.
+
+It runs on the schedule "{{ .Values.schedule }}" and writes its results to PostgreSQL.
+
+To start a run now:
+
+  kubectl create job --from=cronjob/{{ include "psc-pipeline.fullname" . }} {{ include "psc-pipeline.fullname" . }}-manual
+
+To connect to the database:
+
+  kubectl port-forward svc/postgres 5432:5432
+  psql "postgresql://{{ .Values.postgres.auth.username }}@localhost:5432/{{ .Values.postgres.auth.database }}"
