@@ -74,8 +74,8 @@ Everything else is up to you to decide: for example, what counts as a person, an
 
 [`kubernetes/helm/psc-pipeline/`](kubernetes/helm/psc-pipeline/) is a Helm chart for this pipeline. A teammate asked an AI agent for "a chart that runs the pipeline every week, with a Postgres database for the results", and merged what it produced without a review. Nobody has run it yet.
 
-1. Change the chart so that it deploys your pipeline. It doesn't have to be exactly how you'd run it in production, but it must be correct: if we install it on a cluster, your pipeline must run and write its output. You don't need a cluster for this exercise, but a local one (for example [kind](https://kind.sigs.k8s.io/)) is a good way to check your work.
-2. Review the chart as you would review that teammate's pull request. Put the review in `REVIEW.md`: what is wrong with the chart as you received it, how much each problem matters, and what you changed. Include the problems you chose not to fix, and say why.
+1. First, review the chart as you received it, before you change it, as you would review that teammate's pull request. Put the review in `REVIEW.md`: what is wrong with the chart and how much each problem matters.
+2. Then change the chart so that it deploys your pipeline. It doesn't have to be exactly how you'd run it in production, but it must be correct: if we install it on a cluster, your pipeline must run and write its output. You don't need a cluster for this exercise, but a local one (for example [kind](https://kind.sigs.k8s.io/)) is a good way to check your work. In `REVIEW.md`, say what you changed for each problem, and which problems you chose not to fix and why.
 
 ### Production: write-up only
 
