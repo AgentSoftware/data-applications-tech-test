@@ -102,7 +102,7 @@ The repository already has `NOTES.md`, `REVIEW.md` and `artifacts/` for you to f
    - **Production:** your answer to the write-up above.
    - **What I'd do next:** including where your solution might not work in production.
 3. [**`REVIEW.md`**](REVIEW.md), filled in: your review of the chart from Part 2.
-4. [**`artifacts/`**](artifacts/), with what you produced along the way: plans, specs, prompts, and any skills or agent instructions (for example a `CLAUDE.md`). You don't need to share full session logs, but the folder must show how you used AI. **Do remove any secrets**.
+4. [**`artifacts/`**](artifacts/), with what you produced along the way: plans, specs, prompts, and any skills or agent instructions (for example a `CLAUDE.md`). You don't need to share full session logs, but the folder must show how you used AI. **Make sure you remove any secrets**.
 5. **How to run it:** fill in the "Running the solution" section of [`README.md`](README.md) with the exact commands to run your pipeline from a clean clone, to deploy it with your chart, and to look up one company in the output.
 
 ## What happens next
