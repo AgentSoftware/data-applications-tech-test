@@ -11,7 +11,7 @@ This is a small, realistic piece of the work our data team does: take a raw publ
 
 ## Background
 
-Kraken, our property data API, tells customers who is behind a company. The source is the Persons with Significant Control (PSC) register. Companies House publishes the whole register as a snapshot every week.
+Kraken, our property data API, tells customers who is behind a company. This matters for property: many properties are owned by companies, and one corporate landlord can own hundreds of them, so the people behind a company are often the people behind those properties. The source is the Persons with Significant Control (PSC) register. Companies House publishes the whole register as a snapshot every week.
 
 A PSC can be a person, or another company (a "corporate PSC"). When a company is controlled by another company, the people who actually control it are registered against that other company, or against a company further up the chain. To answer "who controls this company?", you have to follow the chain.
 
