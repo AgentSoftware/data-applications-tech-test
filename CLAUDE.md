@@ -5,6 +5,7 @@ Tech test: build a PSC pipeline (Part 1) and fix/review a Helm chart (Part 2). T
 ## Working rules
 
 - **Never `git commit` or `git push` without explicit approval from the user.** Show the changes and ask first.
+- Don't add a `Co-Authored-By: Claude …` trailer (or any other AI attribution) to commit messages.
 - `NOTES.md` is written by the user, not by Claude. Don't draft or edit it unless asked.
 - Build only what `TASK.md` asks for. Keep it small, tested and end to end.
 
