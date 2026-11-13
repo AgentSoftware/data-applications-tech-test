@@ -214,6 +214,15 @@ An example is a corporate PSC that only has the right to appoint directors.
 - **Q4.** A person reached along several paths: list once at the lowest level (proposed), or at every level they appear?
 - **Q5.** Super-secure and unfollowable controllers: show them as placeholders (proposed), or leave them out of the response and keep them only in `data_issue`?
 
+### Answers (2026-11-13)
+
+- **Q1:** Postgres both locally and in the cluster, with Docker Compose for local runs. See ADR 0006.
+- **Q2:** BFS in Python. See ADR 0001.
+- **Q3:** Still open. Addresses stay out by default (ADR 0002).
+- **Q4:** ~~Lowest level by default, with `route_count` and `other_levels`. All routes go in a separate table (capped), for an optional `all_routes` parameter.~~ Revised after review: each registration is listed at its company's lowest level, with `via` and `route_count` (the number of shortest routes). People aren't merged, and there's no all-routes table; that goes in `NOTES.md` as a next step. See ADR 0003.
+- **Q5:** Super-secure PSCs always appear as protected placeholders. A reveal option isn't possible because the source has no identity (ADR 0004). Unfollowable corporate PSCs appear in an `unfollowed` list with a reason code (ADRs 0005 and 0009). Legal persons appear in `other_controllers` (ADR 0007).
+- **Q3 (closed):** addresses, nationality and country of residence are left out. Month and year of birth stay in the answer (ADR 0011).
+
 ## 5. Out of scope (unless we have time left)
 
 The API itself, the reverse lookup, incremental weekly loads, and fuzzy matching of unresolvable corporates by name.

@@ -22,6 +22,7 @@ The full generated report is in the **Appendix** below. This first part says wha
    - 181 are short digit strings that need zero-padding to 8 characters,
    - 49 are lower case,
    - 1 is unrecognised: `R0000134`, an old Northern Ireland style number. Keep it as it is and flag it.
+     - *Update (2026-11-13):* `R` plus 7 digits is now an accepted format, so this number is valid (ADR 0009).
 
    Self links always agree with the normalised number. The prefixes seen are SC, OC, OE (overseas entities), NI, SL, SO, NC and ZC.
 5. **Dates:**
@@ -38,6 +39,7 @@ The full generated report is in the **Appendix** below. This first part says wha
    - 123 are UK companies that aren't in the snapshot.
    - **41 are non-UK numbers that collide with a UK company in the file.** For example Goldman Sachs Group, Inc. (Delaware `2923466`) would become `02923466`. A naive join links these to the wrong company.
    - 32 are UK numbers in a format we don't yet recognise, such as `Sc19230` and `Sl32751`. These are prefix plus short digits and need zero-padding after the prefix, so the normaliser has to handle them.
+     - *Update (2026-11-13):* checked. 13 active links have a prefix with fewer than 6 digits, and when padded, 12 of them match a company in the sample (ADR 0009). The 32 count comes from the earlier rule, which padded digits only.
    - 19 are self-ownership.
    - `country_registered` is free text: England, United Kingdom, Uk, England & Wales, "United Kingdom (England And Wales)", and 268 with no value. Deciding whether a registration is UK needs a rule (D3), and it has to look at `place_registered` too.
 7. **The graph is a graph, not a set of chains.**
