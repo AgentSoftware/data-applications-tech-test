@@ -9,7 +9,8 @@ You don't need to share full session logs, but this folder must show how you use
 ```
 artifacts/
   plans/               Implementation plans (Part 1 pipeline, Part 2 chart, etc.)
-  specs/               Specs and design decisions written before/while building
+  specs/               Specs written before/while building
+  decisions/           ADRs: one per judgement call
   prompts/             Prompts given to AI tools, and notes on where I stepped in
   agent-instructions/  CLAUDE.md, skills and any other agent instructions
 ```
