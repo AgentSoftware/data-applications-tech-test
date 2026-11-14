@@ -9,3 +9,4 @@ kubernetes/helm/*/charts/*.tgz
 
 # Local data exploration (copies of source data)
 exploration/
+*.egg-info/
