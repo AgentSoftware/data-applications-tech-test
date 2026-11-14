@@ -6,6 +6,14 @@
 - Scope: Part 1 only. The Helm chart (Part 2) gets its own plan (03). This plan fixes only the interface the chart will call.
 - Guiding rule: the brief is "not looking for feature count, polish, or a perfect solution". We build the smallest pipeline that is correct end to end, with tests on the logic that matters, and nothing else.
 
+## Changes during the build (2026-11-14)
+
+- The SQL lives in the package (`src/psc_pipeline/sql/audit.sql` and `schema.sql`), not in a top-level `sql/`, so the installed image can find it.
+- Steps 6 and 7 both went into `build.py`, as planned. `data_quality` counts only warnings and errors (the user's decision).
+- Bugs found and fixed while building are listed in each step report in the prompt log and session. The main ones: ISO week dates, non-ASCII digits, a second totals line, invalid birth months, duplicates not tied to a company, missing `levels`, and a crash when there is no snapshot date.
+- Docker Desktop's engine wasn't running in the build session. The integration tests and the full-sample load were run against a throwaway Postgres 16 from the `pgserver` pip package, in a scratch venv. `docker compose` and the image build still need to be run once.
+- Later on 2026-11-14 the image was built and run with Compose. Run 6 loaded the full sample (29,125 companies, every fail rule passed, exit 0). The user found the database holding test data: the integration tests had published their 3-company fixture into the same `psc` database. They now create and use their own `psc_test` database (override with `PSC_TEST_DATABASE_URL`).
+
 ## 1. What "done" looks like
 
 From a clean clone:

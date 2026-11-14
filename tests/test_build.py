@@ -1,9 +1,10 @@
 import json
+from collections import Counter
 from pathlib import Path
 
-from psc_pipeline.build import build_payloads, control_status
+from psc_pipeline.build import build_payloads, control_status, run_checks, summary
 from psc_pipeline.graph import build_ancestors, classify_links, owner_map
-from psc_pipeline.parse import parse_file
+from psc_pipeline.parse import Parsed, parse_file
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -87,3 +88,59 @@ def test_company_with_nothing_active_still_has_levels(tmp_path):
     out = parse_file(tmp_path / "s.txt")
     payloads, statuses = build_payloads(out, [], build_ancestors({"00000001"}, {}, out.issues), out.issues)
     assert payloads["00000001"]["levels"] == [] and statuses["00000001"] == "no_active_psc"
+
+
+# --- run checks (ADR 0012) ----------------------------------------------------------------
+
+GOOD_TRAILER = {"persons_of_significant_control_count": 1000, "statements_count": 10, "exemptions_count": 0}
+
+
+def parsed(trailer=GOOD_TRAILER, psc=1000, statement=10, malformed=0, lines=1010):
+    return Parsed(trailer=trailer, line_count=lines,
+                  distinct_by_group=Counter({"psc": psc - malformed, "statement": statement}),
+                  malformed_by_group=Counter({"psc": malformed}))
+
+
+def check(p, links=(), payloads=None):
+    issues = []
+    failed = run_checks(p, list(links), {"00000001": {}} if payloads is None else payloads, issues)
+    return failed, sorted((i.check_code, i.severity) for i in issues)
+
+
+def test_clean_run_passes():
+    assert check(parsed(malformed=1)) == ([], [])  # 1 malformed of 1010 lines, and it balances the trailer
+
+
+def test_trailer_missing_fails():
+    assert check(parsed(trailer=None))[0] == ["trailer_missing"]
+
+
+def test_trailer_gap_small_warns_large_fails():
+    assert check(parsed(psc=999)) == ([], [("trailer_count_mismatch", "warning")])    # 1 of 1000 = 0.1%
+    assert check(parsed(psc=998))[0] == ["trailer_count_mismatch"]                     # 0.2%
+
+
+def test_malformed_share_threshold():
+    assert check(parsed(malformed=1, lines=1000))[0] == []   # exactly 0.1%
+    assert check(parsed(malformed=2, lines=1000))[0] == ["malformed_share_exceeded"]
+
+
+def test_unfollowed_share_warns_only():
+    links = [{"link_status": "followed"}] * 84 + [{"link_status": "non_uk_registration"}] * 16
+    assert check(parsed(), links) == ([], [("unfollowed_share_high", "warning")])
+    links = [{"link_status": "followed"}] * 85 + [{"link_status": "non_uk_registration"}] * 15
+    assert check(parsed(), links) == ([], [])
+
+
+def test_unreachable_key_and_empty_output_fail():
+    assert check(parsed(), payloads={"9906121": {}})[0] == ["unreachable_serving_key"]
+    assert check(parsed(), payloads={})[0] == ["empty_output"]
+
+
+def test_summary_mentions_state_and_failures():
+    p = parsed(trailer=None)
+    issues = []
+    failed = run_checks(p, [], {"00000001": {}}, issues)
+    text = summary(7, p, issues, failed, published=False, company_count=1)
+    assert text.startswith("PSC pipeline run 7: FAILED") and "fail rules: trailer_missing" in text
+    assert "SUCCEEDED (published)" in summary(8, parsed(), [], [], published=True, company_count=1)

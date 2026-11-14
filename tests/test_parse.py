@@ -73,6 +73,11 @@ def test_snapshot_date_from_trailer_and_mismatch(tmp_path):
     assert codes(out) == ["snapshot_date_mismatch"]
 
 
+def test_no_snapshot_date_marks_nothing_active(tmp_path):
+    out = run(tmp_path, ind(), trailer=False)  # no trailer and no date in the file name
+    assert out.snapshot_date is None and out.psc[0]["is_active"] is False
+
+
 def test_no_trailer_falls_back_to_file_name(tmp_path):
     out = run(tmp_path, ind(), name="snapshot-2026-10-22.txt", trailer=False)
     assert out.trailer is None and out.snapshot_date == date(2026, 10, 22)

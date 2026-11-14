@@ -1,5 +1,8 @@
-"""Serving payload per company. Rules: spec 02 section 5; ADRs 0003, 0004, 0007."""
-from collections import defaultdict
+"""Serving payload per company, run checks and summary. Rules: spec 02 sections 3.4, 5, 6; ADRs 0003, 0004, 0007, 0012."""
+from collections import Counter, defaultdict
+
+from .normalise import normalise_number
+from .parse import Issue
 
 
 def _clean(d: dict) -> dict:
@@ -105,3 +108,68 @@ def control_status(level0) -> str:
     if level0.get("statements"):
         return "psc_statement_only"
     return "no_active_psc"
+
+
+# --- Run checks and summary (spec 02 section 3.4 and 6; ADR 0012) ---------------------------
+
+MAX_MALFORMED_SHARE = 0.001     # fail above 0.1% of lines
+MAX_TRAILER_GAP_SHARE = 0.001   # fail above 0.1% of a trailer count; warn on any gap
+MAX_UNFOLLOWED_SHARE = 0.15     # warn above 15% of active corporate links
+TRAILER_KEYS = {"psc": "persons_of_significant_control_count", "statement": "statements_count",
+                "exemption": "exemptions_count"}
+
+
+def run_checks(parsed, links, payloads, issues) -> list[str]:
+    """Adds run-level issues; returns the check codes that fail the run."""
+    failed = []
+
+    def add(code, severity, fails=False, **details):
+        issues.append(Issue(code, severity, "flagged", details=details or None))
+        if fails:
+            failed.append(code)
+
+    if parsed.trailer is None:
+        add("trailer_missing", "error", True)
+    else:
+        for group, key in TRAILER_KEYS.items():
+            expected = parsed.trailer.get(key)
+            if not isinstance(expected, int):
+                add("trailer_count_mismatch", "error", True, group=group, trailer=expected, reason="no count")
+                continue
+            gap = expected - parsed.distinct_by_group[group] - parsed.malformed_by_group[group]
+            if gap:
+                too_big = abs(gap) > MAX_TRAILER_GAP_SHARE * max(expected, 1)
+                add("trailer_count_mismatch", "error" if too_big else "warning", too_big,
+                    group=group, trailer=expected, parsed=parsed.distinct_by_group[group],
+                    malformed=parsed.malformed_by_group[group], gap=gap)
+    malformed = sum(parsed.malformed_by_group.values())
+    if parsed.line_count and malformed > MAX_MALFORMED_SHARE * parsed.line_count:
+        add("malformed_share_exceeded", "error", True, malformed=malformed, lines=parsed.line_count)
+    if links:
+        unfollowed = sum(l["link_status"] != "followed" for l in links)
+        if unfollowed > MAX_UNFOLLOWED_SHARE * len(links):
+            add("unfollowed_share_high", "warning", unfollowed=unfollowed, links=len(links))
+    bad_keys = [k for k in payloads if normalise_number(k) != k]
+    if bad_keys:
+        add("unreachable_serving_key", "error", True, examples=bad_keys[:10], count=len(bad_keys))
+    if not payloads:
+        add("empty_output", "error", True)
+    return failed
+
+
+def summary(run_id, parsed, issues, failed, published, company_count) -> str:
+    state = "SUCCEEDED (published)" if published else ("FAILED (nothing published)" if failed
+                                                       else "SUCCEEDED (dry run, nothing written)")
+    t = parsed.trailer or {}
+    recon = "  ".join(
+        f"{g} {t.get(k)} vs {parsed.distinct_by_group[g]:,} + {parsed.malformed_by_group[g]} malformed"
+        for g, k in TRAILER_KEYS.items())
+    counts = Counter((i.check_code, i.action) for i in issues)
+    lines = [f"PSC pipeline {f'run {run_id}' if run_id is not None else 'dry run'}: {state}",
+             f"snapshot {parsed.snapshot_date}  lines {parsed.line_count:,}  "
+             f"records {sum(parsed.distinct_by_group.values()):,}  companies {company_count:,}",
+             f"reconciliation  {recon}",
+             "issues by check_code and action:"]
+    lines += [f"  {code:34} {action:13} {n:>7,}" for (code, action), n in sorted(counts.items())]
+    lines.append("fail rules: " + (", ".join(failed) if failed else "all passed"))
+    return "\n".join(lines)

@@ -37,7 +37,40 @@ The sample holds about 48,000 records for about 29,000 companies, in the format 
 
 ## Running the solution
 
-_Replace this section with the exact commands to run your pipeline from a clean clone, to deploy it with your chart, and to look up one company in the output._
+### Run the pipeline locally (Docker Compose)
+
+```
+git clone <this repository> && cd data-applications-tech-test
+docker compose up -d postgres
+docker compose run --rm --build pipeline      # parses data/, runs the checks, publishes to Postgres
+```
+
+The run prints a quality summary and exits 0 when it published, 1 when a check failed (nothing published), 2 on any other error.
+
+### Look up one company
+
+```
+docker compose exec postgres psql -U psc -d psc -c \
+  "SELECT jsonb_pretty(payload) FROM psc.psc_by_company WHERE company_number = '04555610'"
+```
+
+What the checks found: `psc_audit.pipeline_run` (one row per run) and `psc_audit.data_issue` (one row per finding), for example
+`SELECT check_code, action, count(*) FROM psc_audit.data_issue WHERE run_id = (SELECT max(run_id) FROM psc_audit.pipeline_run) GROUP BY 1, 2 ORDER BY 3 DESC;`
+
+### Without Docker (Python 3.11+)
+
+```
+python3 -m venv .venv && . .venv/bin/activate && pip install -e '.[dev]'
+pytest                                                    # unit tests, no database needed
+python -m psc_pipeline --input data/persons-with-significant-control-snapshot-2026-10-29-sample.txt.gz --dry-run
+pytest -m integration   # needs the compose Postgres; uses its own psc_test database
+```
+
+### Deploy with the chart
+
+_To do in Part 2._
+
+Design notes: [`artifacts/`](artifacts/) (specs, plans and one ADR per decision).
 
 ---
 

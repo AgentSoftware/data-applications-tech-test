@@ -132,12 +132,14 @@ def parse_file(path) -> Parsed:
 
     out.snapshot_date = snapshot_date(out, path)
     resolve_conflicts(out, by_self_link)
-    if out.snapshot_date:
-        for row in out.psc + out.statements:
+    for row in out.psc + out.statements:
+        if out.snapshot_date:
             set_active(row, out.snapshot_date, out.issues)
-        for row in out.psc:
-            if row["is_active"]:
-                person_checks(row, out.snapshot_date, out.issues)
+        else:
+            row["is_active"] = False  # no snapshot date: nothing is "now"; the run fails on trailer_missing
+    for row in out.psc:
+        if row["is_active"]:
+            person_checks(row, out.snapshot_date, out.issues)
     return out
 
 
