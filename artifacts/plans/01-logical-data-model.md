@@ -1,6 +1,6 @@
 # Plan 01: Logical data model
 
-- Status: **Draft v3, awaiting approval**
+- Status: **Approved** (2026-11-13). v4 renames only (2026-11-14).
 - Inputs: [spec 00](../specs/00-task-understanding.md), [spec 01 data profile](../specs/01-data-profile.md), ADRs [0001](../decisions/0001-traversal-bfs-in-python.md) to [0012](../decisions/0012-when-the-run-fails.md)
 - Output of this step: `artifacts/specs/02-logical-data-model.md` (entities, keys, the payload contract, issue codes and worked examples). It contains no code and no DDL. The DDL comes in the implementation plan (plan 02).
 
@@ -8,6 +8,10 @@ Changes since v1 (2026-11-13), after the user's review:
 - Personal data trimmed (ADR 0011): nationality, country of residence and name elements removed.
 - ADRs added for every judgement call: person definition (0007), ceased records (0008), chain breaks (0009), duplicates and malformed records (0010). Loops are covered by 0001.
 - Added a `company_ancestor` table (the BFS output), an ER diagram (section 3) and a worked example (section 5).
+
+Changes since v3 (2026-11-14):
+- Names aligned with [ADR 0013](../decisions/0013-naming-conventions.md): `check` → `check_code` (a reserved SQL word), `statement`/`exemption` → `psc_statement`/`psc_exemption`, each generic `status` → `run_status`/`control_status`/`link_status`, abbreviations spelled out (`registration_number`, `birth_year`), counts end in `_count`.
+- `run_id` is no longer part of the clean-table keys (one run at a time, swapped in).
 
 Changes since v2 (2026-11-13), after an external review that was checked against the data:
 - **Several routes made simpler (ADR 0003):** each registration is listed at its company's lowest level. People aren't merged, there's no `other_levels`, and `psc_routes_by_company` is removed. `route_count` is now the number of shortest routes.
@@ -41,8 +45,8 @@ flowchart LR
   raw["data/*.txt.gz<br/>(read-only source)"] -->|parse, check, clean| clean
   subgraph clean["Clean tables (one fact once)"]
     psc[psc]
-    st[statement]
-    ex[exemption]
+    st[psc_statement]
+    ex[psc_exemption]
     co[company]
     link[ownership_link]
   end
@@ -58,15 +62,15 @@ flowchart LR
 
 ## 3. Logical data model (ER diagram)
 
-`run_id` is part of every key, so each weekly run is self-contained and can be swapped in as a whole. It's left out of the diagram's relationships to keep it readable.
+The clean and serving tables hold **one run at a time**. A new run is built in a staging schema and swapped in (plan 02), so `run_id` is a plain column on them, not part of the key. `pipeline_run` and `data_issue` keep every run. Naming conventions: [ADR 0013](../decisions/0013-naming-conventions.md).
 
 ```mermaid
 erDiagram
   pipeline_run ||--o{ data_issue : "logs"
   pipeline_run ||--o{ company : "builds"
   company ||--o{ psc : "has registered"
-  company ||--o{ statement : "has"
-  company ||--o{ exemption : "has"
+  company ||--o{ psc_statement : "has"
+  company ||--o{ psc_exemption : "has"
   psc ||--o| ownership_link : "if corporate"
   company ||--o{ ownership_link : "is owned via"
   company |o--o{ ownership_link : "is the owner in"
@@ -79,77 +83,81 @@ erDiagram
     text source_file
     text source_sha256
     date snapshot_date
-    text status
-    int lines_read
-    int malformed_lines
-    int duplicate_records
+    timestamptz started_at
+    timestamptz finished_at
+    text run_status "running | succeeded | failed"
+    text failure_reason
+    int line_count
+    int malformed_line_count
+    int duplicate_record_count
     jsonb trailer_counts
     jsonb parsed_counts
     bool reconciled
   }
   company {
     text company_number PK
-    text status "ok | no_active_psc | psc_statement_only | exempt"
+    text control_status "ok | no_active_psc | psc_statement_only | exempt"
   }
   psc {
     int source_line PK
     text company_number FK
     text company_number_raw
-    text record_hash
+    text line_hash
     text kind
     text psc_type "individual | corporate | legal_person | super_secure"
     text name
-    int dob_year
-    int dob_month
+    int birth_year
+    int birth_month
     text_array natures_of_control
     date notified_on
     date ceased_on
     text ceased_on_raw
     bool is_active
-    text reg_number_raw
-    text reg_number
+    text registration_number_raw
+    text registration_number
     text country_registered
     text place_registered
     text description "super-secure only"
     text self_link
   }
-  statement {
+  psc_statement {
     int source_line PK
     text company_number FK
-    text statement
+    text statement_code
     date notified_on
     date ceased_on
     bool is_active
   }
-  exemption {
+  psc_exemption {
     int source_line PK
     text company_number FK
-    jsonb exemptions
+    jsonb exemption_details
   }
   ownership_link {
     int source_line PK "FK to psc"
     text owned_company_number FK
     text owner_company_number FK "null unless followed"
-    text status "followed | reason code"
+    text link_status "followed | reason code"
   }
   company_ancestor {
     text company_number PK
     text ancestor_company_number PK
     int level
-    text_array via
+    text_array via_company_numbers
     int route_count "number of shortest routes"
   }
   data_issue {
     int issue_id PK
-    text check
+    int run_id FK
+    text check_code
     text severity "error | warning | info"
     text action "rejected | dropped | fixed | flagged | not_followed"
     int source_line
     text company_number
-    text field
+    text field_name
     text raw_value
     text fixed_value
-    jsonb detail
+    jsonb details
   }
   psc_by_company {
     text company_number PK
@@ -158,7 +166,7 @@ erDiagram
 ```
 
 Cardinalities:
-- A company has 0 to N PSC, statement and exemption records.
+- A company has 0 to N `psc`, `psc_statement` and `psc_exemption` rows.
 - A PSC has 0 or 1 ownership links (corporate kinds only).
 - A link has 0 or 1 owner companies (null when it can't be followed).
 - A company has 1 to N ancestor rows, including itself at level 0.
@@ -167,7 +175,7 @@ Cardinalities:
 ### Notes on the tables
 
 - **`psc`** holds only the fields the answer or the checks need (ADR 0011). Addresses, nationality, country of residence, name elements and identity-verification details stay in the raw file.
-- **`company_ancestor`** is the BFS output (ADR 0001). The company itself is at level 0, and every company above it gets its lowest `level`, its first shortest `via` chain and its `route_count` (the number of shortest routes, counted during the BFS; ADR 0003). It's the link between the graph and the answer, and the main thing the tests check.
+- **`company_ancestor`** is the BFS output (ADR 0001). The company itself is at level 0, and every company above it gets its lowest `level`, its first shortest chain (`via_company_numbers`) and its `route_count` (the number of shortest routes, counted during the BFS; ADR 0003). It's the link between the graph and the answer, and the main thing the tests check.
 - **`data_issue`:** a normal ceased record gets **no** row, because it's valid history (ADR 0008). Every drop, fix, flag or unfollowed link does.
 
 ## 4. Serving payload (`psc_by_company.payload`)
@@ -203,7 +211,7 @@ This builds on the brief's example (Ada, Bo and Cy, a request for `ZZ000001`). A
 
 **psc** (8 rows; line 9 dropped as a duplicate)
 
-| source_line | company_number | psc_type | name | is_active | reg_number |
+| source_line | company_number | psc_type | name | is_active | registration_number |
 |---|---|---|---|---|---|
 | 1 | ZZ000001 | individual | Ada | true | |
 | 2 | ZZ000001 | corporate | Two Ltd | true | ZZ000002 |
@@ -216,7 +224,7 @@ This builds on the brief's example (Ada, Bo and Cy, a request for `ZZ000001`). A
 
 **ownership_link**
 
-| source_line | owned_company_number | owner_company_number | status |
+| source_line | owned_company_number | owner_company_number | link_status |
 |---|---|---|---|
 | 2 | ZZ000001 | ZZ000002 | followed |
 | 5 | ZZ000002 | ZZ000003 | followed |
@@ -224,7 +232,7 @@ This builds on the brief's example (Ada, Bo and Cy, a request for `ZZ000001`). A
 
 **data_issue**
 
-| check | action | source_line | raw_value → fixed_value |
+| check_code | action | source_line | raw_value → fixed_value |
 |---|---|---|---|
 | registration_number_normalised | fixed | 5 | `zz000003 ` → `ZZ000003` |
 | non_uk_registration | not_followed | 7 | Delaware 4801182 |
@@ -248,7 +256,7 @@ The join is `company_ancestor` → `psc` (active only, matched on `ancestor_comp
 - super_secure → `protected`
 - legal_person → `other_controllers`
 - a corporate link that was followed → `companies`
-- a corporate link that wasn't followed → `unfollowed`, with the link's `status` as the reason
+- a corporate link that wasn't followed → `unfollowed`, with the link's `link_status` as the reason
 
 ### 5.5 The answer: `psc_by_company` row for ZZ000001
 
@@ -256,7 +264,7 @@ The join is `company_ancestor` → `psc` (active only, matched on `ancestor_comp
 {
   "company_number": "ZZ000001",
   "snapshot_date": "2026-10-29",
-  "status": "ok",
+  "control_status": "ok",
   "levels": [
     {
       "level": 0,

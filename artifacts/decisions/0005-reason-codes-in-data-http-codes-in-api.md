@@ -9,8 +9,8 @@ The user asked whether responses should carry status codes and descriptions. The
 
 ## Decision
 
-- **In the data:** stable, machine-readable reason codes, each with a short description. Each code appears both in the payload and in `data_issue.check`. For example:
-  - Company `status`: `ok`, `no_active_psc`, `psc_statement_only`, `exempt`.
+- **In the data:** stable, machine-readable reason codes, each with a short description. Each code appears both in the payload and in `data_issue.check_code`. For example:
+  - Company `control_status`: `ok`, `no_active_psc`, `psc_statement_only`, `exempt`.
   - Unfollowed links: `non_uk_registration`, `foreign_number_collision`, `no_registration_number`, `jurisdiction_missing`, `unrecognised_registration_number`, `uk_company_not_in_snapshot`, `self_ownership`, `cycle`.
   - Cleaning fixes: `company_number_normalised`, `date_timestamp_truncated`, and so on.
 - **In an API**, if we build one, standard HTTP status codes:
