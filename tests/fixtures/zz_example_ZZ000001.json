@@ -1,0 +1,52 @@
+{
+  "company_number": "ZZ000001",
+  "snapshot_date": "2026-10-29",
+  "control_status": "ok",
+  "levels": [
+    {
+      "level": 0,
+      "people": [
+        {"name": "Ada", "kind": "individual-person-with-significant-control", "birth_year": 1980, "birth_month": 3,
+         "natures_of_control": ["ownership-of-shares-75-to-100-percent"], "notified_on": "2019-01-01",
+         "company_number": "ZZ000001", "via": [], "route_count": 1}
+      ],
+      "companies": [
+        {"name": "Two Ltd", "owner_company_number": "ZZ000002",
+         "natures_of_control": ["ownership-of-shares-75-to-100-percent"], "notified_on": "2019-01-01",
+         "company_number": "ZZ000001", "via": [], "route_count": 1}
+      ]
+    },
+    {
+      "level": 1,
+      "people": [
+        {"name": "Bo", "kind": "individual-person-with-significant-control", "birth_year": 1975, "birth_month": 7,
+         "natures_of_control": ["voting-rights-25-to-50-percent"], "notified_on": "2020-06-01",
+         "company_number": "ZZ000002", "via": ["ZZ000002"], "route_count": 1}
+      ],
+      "companies": [
+        {"name": "Three Ltd", "owner_company_number": "ZZ000003",
+         "natures_of_control": ["ownership-of-shares-75-to-100-percent"], "notified_on": "2020-06-01",
+         "company_number": "ZZ000002", "via": ["ZZ000002"], "route_count": 1}
+      ]
+    },
+    {
+      "level": 2,
+      "people": [
+        {"name": "Cy", "kind": "individual-person-with-significant-control", "birth_year": 1960, "birth_month": 1,
+         "natures_of_control": ["ownership-of-shares-25-to-50-percent"], "notified_on": "2018-02-01",
+         "company_number": "ZZ000003", "via": ["ZZ000002", "ZZ000003"], "route_count": 1}
+      ],
+      "protected": [
+        {"kind": "super-secure-person-with-significant-control",
+         "description": "super-secure-persons-with-significant-control",
+         "company_number": "ZZ000003", "via": ["ZZ000002", "ZZ000003"], "route_count": 1}
+      ],
+      "unfollowed": [
+        {"name": "Acme Inc", "kind": "corporate-entity-person-with-significant-control",
+         "registration_number_raw": "4801182", "country_registered": "Delaware", "reason": "non_uk_registration",
+         "company_number": "ZZ000003", "via": ["ZZ000002", "ZZ000003"], "route_count": 1}
+      ]
+    }
+  ],
+  "data_quality": {"issue_count": 1, "check_codes": ["non_uk_registration"]}
+}

@@ -94,6 +94,7 @@ def parse_file(path) -> Parsed:
         if h in first_line_of:
             out.duplicate_count += 1
             out.issues.append(Issue("duplicate_record", "info", "dropped", n,
+                                    normalise_number(rec.get("company_number")),
                                     details={"duplicate_of_line": first_line_of[h]}))
             continue
         first_line_of[h] = n

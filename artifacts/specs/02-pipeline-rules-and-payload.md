@@ -166,7 +166,7 @@ Exact duplicates aren't added back. The profile shows the trailer counts distinc
 
 ## 5. The payload contract (`build.py`)
 
-Lists are in `source_line` order, so the output is deterministic. Fields that are null or empty lists are left out.
+Lists are in `source_line` order, so the output is deterministic. Fields that are null or empty lists are left out, except `via` (always present, `[]` at level 0) and `levels` (always present, `[]` when nothing is active). Every entry carries `route_count`, the number of shortest routes to its company.
 
 ```text
 {
@@ -175,7 +175,7 @@ Lists are in `source_line` order, so the output is deterministic. Fields that ar
   levels: [ { level,
               people:            [ {name, kind, birth_year, birth_month, natures_of_control, notified_on, company_number, via} ],
               protected:         [ {kind, description, company_number, via} ],
-              companies:         [ {name, owner_company_number, natures_of_control, notified_on, company_number, via, route_count, already_at_level?} ],
+              companies:         [ {name, owner_company_number, natures_of_control, notified_on, company_number, via, route_count, already_at_level?, not_expanded?} ],
               other_controllers: [ {name, kind, legal_form, natures_of_control, notified_on, company_number, via} ],
               unfollowed:        [ {name, kind, registration_number_raw, country_registered, reason, company_number, via} ],
               statements:        [ {statement_code, notified_on, company_number, via} ],
@@ -185,14 +185,14 @@ Lists are in `source_line` order, so the output is deterministic. Fields that ar
 ```
 
 - **`company_number`** on each entry is the company the registration belongs to (the company at that level). **`via`** is the path from the requested company to that company, not including the requested company. It's `[]` at level 0.
-- **`companies`** entries are the followed corporate registrations at that level. `owner_company_number` is the company they point to, whose registrations make up the next level. If that company was already placed at a level less than or equal to this one (a cycle, or another route), the entry carries `already_at_level` and isn't expanded again. That's how a cycle shows up in the answer without looping.
+- **`companies`** entries are the followed corporate registrations at that level. `owner_company_number` is the company they point to, whose registrations make up the next level. If that company was already placed at a level less than or equal to this one (a cycle, or another route), the entry carries `already_at_level` and isn't expanded again. That's how a cycle shows up in the answer without looping. If the depth cap stopped the BFS before that company, the entry carries `not_expanded: "depth_cap"` instead.
 - **A level** appears only if at least one list in it isn't empty.
 - **`control_status`** is worked out from level 0 only, taking the first that applies:
   - `ok` if level 0 has any entry in `people`, `protected`, `companies`, `other_controllers` or `unfollowed`;
   - otherwise `exempt` if there are active exemptions;
   - otherwise `psc_statement_only` if there are active statements;
   - otherwise `no_active_psc`.
-- **`data_quality`** covers issues on records of the companies in this answer (every level), plus `cycle` issues that involve them. Run-level issues aren't included.
+- **`data_quality`** covers **warning and error** issues on records of the companies in this answer (every level), plus `cycle` issues that involve them. Info-level fixes (for example a leading zero added) and run-level issues aren't included; they're all still in `data_issue`. (User decision, 2026-11-14.)
 
 ## 6. The run summary (printed)
 
