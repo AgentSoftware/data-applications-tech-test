@@ -14,7 +14,7 @@ A company's PSC records come in several kinds. Not all of them are people, and n
 | super-secure-person-with-significant-control | a natural person whose identity is withheld (33 active) |
 | corporate-entity-person-with-significant-control | a company, which may be followable (about 8.7k active) |
 | corporate-entity-beneficial-owner | a company (overseas-entity register) |
-| legal-person-person-with-significant-control | a government, a corporation sole and so on, fully identified, with no company register behind it (65 active) |
+| legal-person-person-with-significant-control | a government, a corporation sole and so on, fully identified, with no company register behind it (64 active) |
 
 ## Options
 

@@ -99,13 +99,14 @@ Everything else is ignored.
 | unrecognised_company_number | E | rejected | it fails 1.1 | – |
 | company_number_normalised | I | fixed | 1.1 changed the value | – |
 | duplicate_record | I | dropped | 2.4 | – |
-| conflicting_duplicate | W | flagged | 2.4 | – |
+| conflicting_duplicate | W | flagged (kept copy) / dropped (others) | 2.4 | – |
 | date_timestamp_truncated | I | fixed | 1.3 | – |
 | invalid_date | W | flagged | 1.3 | – |
 | ceased_before_notified | W | flagged | `ceased_on < notified_on` | – |
 | notified_after_snapshot | W | flagged | `notified_on > snapshot_date` | – |
-| missing_birth_date | I | flagged | an individual with no `date_of_birth` | – |
-| implausible_birth_date | W | flagged | an individual younger than 16 on the snapshot date | – |
+| missing_birth_date | I | flagged | an active individual with no usable `date_of_birth` (missing, or the month isn't 1 to 12) | – |
+| duplicate_trailer | W | flagged | more than one totals line; the last one is used | – |
+| implausible_birth_date | W | flagged | an active individual younger than 16 on the snapshot date (using the month) | – |
 | missing_natures_of_control | I | flagged | an active PSC (not super-secure) with no natures | – |
 
 ### 3.2 Per corporate link (`graph.py`, ADR 0009)
