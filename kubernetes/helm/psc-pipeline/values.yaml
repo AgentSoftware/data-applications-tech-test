@@ -1,114 +1,130 @@
 # Default values for psc-pipeline.
-# The chart runs the PSC pipeline as a weekly CronJob and deploys PostgreSQL to store the results.
+# A weekly CronJob runs the PSC pipeline; PostgreSQL (groundhog2k subchart) stores the results.
+# See REVIEW.md for why each setting is what it is.
 
 nameOverride: ""
 fullnameOverride: ""
 
 image:
-  # -- The pipeline image. Build it from the root of the repository.
+  # -- The pipeline image, built from the repository root: docker build -t psc-pipeline:0.1.0 .
+  # On kind: kind load docker-image psc-pipeline:0.1.0. In a real cluster, push it to a registry and set repository.
+  # Use a new tag for every build: with IfNotPresent, a node that has the tag keeps the old image.
   repository: psc-pipeline
-  tag: latest
-  pullPolicy: Always
+  tag: "0.1.0"
+  pullPolicy: IfNotPresent
 
-# -- Secrets for a private image registry.
 imagePullSecrets: []
 
-# -- Runs every Friday at midnight, after Companies House publishes the new snapshot.
-schedule: "0 0 * * 5"
+# -- Weekly, Friday 06:00 UTC. Companies House publishes no fixed time, so check the date of the snapshot you load.
+schedule: "0 6 * * 5"
+timeZone: Etc/UTC
+
+input:
+  # -- File the pipeline reads. The default is the sample baked into the image (ADR 0014).
+  path: /app/data/persons-with-significant-control-snapshot-2026-10-29-sample.txt.gz
+  download:
+    # -- Download a zip before each run into a scratch volume. Then set input.path to /input/<file in the zip>.
+    enabled: false
+    url: ""
+    # -- Cap on the scratch volume. One full snapshot is about 2.4 GB zipped plus 14 GB unzipped.
+    sizeLimit: 20Gi
 
 pipeline:
-  command: ["python", "-m", "psc_pipeline"]
-  args:
-    - --input
-    - /data/persons-with-significant-control-snapshot-2026-10-29.txt
-  # -- Set to true to check the data without writing to the database.
+  # -- true: run every check, write nothing to the database.
   dryRun: false
-  # -- Log level for the pipeline: DEBUG, INFO, WARNING or ERROR.
-  logLevel: INFO
-  # -- The Companies House snapshot to download before each run.
-  sourceUrl: https://download.companieshouse.gov.uk/persons-with-significant-control-snapshot-2026-10-29.zip
 
 job:
-  # -- Retry up to 10 times, so that a temporary failure does not stop the weekly load.
-  backoffLimit: 10
-  concurrencyPolicy: Allow
-  # -- How many finished jobs Kubernetes keeps.
+  # -- Never run two at once: both would build psc_staging. The pipeline also takes a Postgres advisory lock,
+  # which covers manual jobs (kubectl create job --from=cronjob/...) that this setting does not.
+  concurrencyPolicy: Forbid
+  # -- Retry only crashes or lost pods (exit 2, eviction). Exit 1 means a data check failed: retrying
+  # the same input fails the same way, so the job stops at once (podFailurePolicy in cronjob.yaml).
+  backoffLimit: 2
+  # -- Kill a run that hangs. The sample takes seconds.
+  activeDeadlineSeconds: 3600
+  # -- If the controller missed the schedule (for example during an upgrade), still start up to 6 hours late.
+  startingDeadlineSeconds: 21600
+  # -- How long the wait for PostgreSQL (pg_isready) may take before the run fails.
+  waitForDatabaseSeconds: 300
+  # -- Image for the wait step and helm test: the PostgreSQL client tools. Same major version as the server.
+  postgresClientImage: postgres:16.14
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
 
 serviceAccount:
-  # -- Create a service account for the pipeline.
+  # -- A dedicated account with no permissions and no API token: the pipeline never calls the Kubernetes API.
   create: true
   annotations: {}
-  # -- The name of the service account. If not set and create is true, a name is generated from the fullname.
   name: ""
 
 podAnnotations: {}
 
-podSecurityContext: {}
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
 
 securityContext:
-  # -- The pipeline needs these permissions to write the snapshot to the data volume.
-  privileged: true
-  runAsUser: 0
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
 
-resources: {}
-  # We usually recommend not to specify default resources and to leave this as a conscious
-  # choice for the user. This also increases chances charts run on environments with little
-  # resources, such as Minikube. If you do want to specify resources, uncomment the following
-  # lines, adjust them as necessary, and remove the curly braces after 'resources:'.
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
-
-persistence:
-  enabled: true
-  accessModes:
-    - ReadWriteOnce
-  size: 50Gi
-  storageClass: ""
-
-replicaCount: 1
-
-service:
-  type: ClusterIP
-  port: 80
-
-ingress:
-  enabled: false
-  className: ""
-  annotations: {}
-  hosts:
-    - host: chart-example.local
-      paths:
-        - path: /
-          pathType: ImplementationSpecific
-  tls: []
-
-autoscaling:
-  enabled: false
-  minReplicas: 1
-  maxReplicas: 100
-  targetCPUUtilizationPercentage: 80
+# -- Measured: 214 MB peak on the sample. The full snapshot needs a different design (NOTES.md), not a bigger pod.
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    memory: 512Mi
 
 nodeSelector: {}
-
 tolerations: []
-
 affinity: {}
 
+database:
+  # -- Host of an external PostgreSQL. Empty: use the bundled one (postgres.enabled), whose Service is <release>-postgres.
+  host: ""
+  port: 5432
+  # -- The Secret holding the credentials. It must match postgres.settings.existingSecret and
+  # postgres.userDatabase.existingSecret below. Keys: POSTGRES_DB, USERDB_USER, USERDB_PASSWORD, POSTGRES_PASSWORD.
+  # The name is fixed because subchart values can't be templated: one release per namespace.
+  secretName: psc-db
+  # -- Create that Secret. Set false to bring your own (ADR 0015).
+  createSecret: true
+  name: psc
+  user: psc
+  # -- Leave empty to generate a random password on install; it's kept across helm upgrade (lookup).
+  # With GitOps tools that render with `helm template` (Argo CD), lookup sees nothing and the password would
+  # change on every sync: set it here, or use createSecret: false with your own Secret.
+  password: ""
+  superuserPassword: ""
+
 postgres:
-  # -- Deploy PostgreSQL as part of this chart.
+  # -- Deploy PostgreSQL with this chart. Keys below are the groundhog2k chart's own, not Bitnami's.
+  # Don't set postgres.fullnameOverride or nameOverride: the pipeline derives the Service name (<release>-postgres).
   enabled: true
-  auth:
-    postgresPassword: postgres
-    username: psc
-    password: psc-password-123
-    database: psc
-  primary:
-    persistence:
-      # -- The pipeline rebuilds the tables on every run, so the database does not need a volume.
-      enabled: false
+  settings:
+    existingSecret: psc-db
+    superuserPassword:
+      secretKey: POSTGRES_PASSWORD
+  userDatabase:
+    existingSecret: psc-db
+    name:
+      secretKey: POSTGRES_DB
+    user:
+      secretKey: USERDB_USER
+    password:
+      secretKey: USERDB_PASSWORD
+  storage:
+    # -- A PVC, so data and run history survive a PostgreSQL restart. Helm does not delete it on uninstall.
+    requestedSize: 2Gi
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      memory: 1Gi

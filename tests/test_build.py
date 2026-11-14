@@ -1,5 +1,6 @@
 import json
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 from psc_pipeline.build import build_payloads, control_status, run_checks, summary
@@ -144,3 +145,46 @@ def test_summary_mentions_state_and_failures():
     text = summary(7, p, issues, failed, published=False, company_count=1)
     assert text.startswith("PSC pipeline run 7: FAILED") and "fail rules: trailer_missing" in text
     assert "SUCCEEDED (published)" in summary(8, parsed(), [], [], published=True, company_count=1)
+
+
+# --- freshness and week-on-week completeness (ADR 0012 amendment) -------------------------
+
+SNAP = date(2026, 10, 29)
+
+
+def fresh(previous=None, sha="new", companies=100, snap=SNAP, today=date(2026, 10, 30)):
+    p = parsed()
+    p.snapshot_date = snap
+    issues = []
+    failed = run_checks(p, [], {f"{i:08d}": {} for i in range(companies)}, issues, previous, sha, today)
+    return failed, sorted((i.check_code, i.severity) for i in issues)
+
+
+def prev(snap=SNAP, sha="old", companies=100):
+    return {"snapshot_date": snap, "source_sha256": sha, "company_count": companies}
+
+
+def test_first_run_and_normal_next_week_pass():
+    assert fresh() == ([], [])
+    assert fresh(prev(snap=date(2026, 10, 22))) == ([], [])
+
+
+def test_stale_snapshot_warns_after_8_days():
+    assert fresh(today=date(2026, 11, 6)) == ([], [])                                  # 8 days: fine
+    assert fresh(today=date(2026, 11, 7)) == ([], [("snapshot_stale", "warning")])
+
+
+def test_older_snapshot_than_published_fails():
+    assert fresh(prev(snap=date(2026, 11, 5)))[0] == ["snapshot_not_newer"]
+    assert fresh(prev(snap=SNAP))[0] == []                                             # same date: rerun allowed
+
+
+def test_same_file_again_warns():
+    assert fresh(prev(sha="same"), sha="same") == ([], [("snapshot_already_loaded", "warning")])
+
+
+def test_company_count_drop_warns_then_fails():
+    assert fresh(prev(), companies=95) == ([], [])                                     # exactly 5%
+    assert fresh(prev(), companies=94) == ([], [("company_count_drop", "warning")])
+    assert fresh(prev(), companies=80)[0] == []                                        # exactly 20%: warning
+    assert fresh(prev(), companies=79)[0] == ["company_count_drop"]

@@ -68,7 +68,32 @@ pytest -m integration   # needs the compose Postgres; uses its own psc_test data
 
 ### Deploy with the chart
 
-_To do in Part 2._
+On a local [kind](https://kind.sigs.k8s.io/) cluster (needs Docker, `kind`, `helm` and `kubectl`):
+
+```
+kind create cluster --name psc
+docker build -t psc-pipeline:0.1.0 . && kind load docker-image psc-pipeline:0.1.0 --name psc
+
+helm repo add groundhog2k https://groundhog2k.github.io/helm-charts/
+helm dependency build kubernetes/helm/psc-pipeline
+helm install psc kubernetes/helm/psc-pipeline -n psc --create-namespace --wait
+
+# the CronJob runs weekly; start a run now
+kubectl -n psc create job --from=cronjob/psc-psc-pipeline run-now
+kubectl -n psc wait --for=condition=complete job/run-now --timeout=5m
+kubectl -n psc logs job/run-now          # run summary
+helm test psc -n psc                     # passes when psc.psc_by_company has rows
+
+# look up one company
+kubectl -n psc exec psc-postgres-0 -c postgres -- sh -c 'PGPASSWORD=$USERDB_PASSWORD psql -h localhost -U psc -d psc \
+  -c "SELECT jsonb_pretty(payload) FROM psc.psc_by_company WHERE company_number = '\''04555610'\''"'
+```
+
+By default the chart reads the sample baked into the image. To download a snapshot before each run instead, set `input.download.enabled=true`, `input.download.url=<zip URL>` and `input.path=/input/<file in the zip>`. For an external PostgreSQL, set `postgres.enabled=false` and `database.host`. The review of the chart, and what changed, is in [REVIEW.md](REVIEW.md).
+
+Chart tests: `pytest tests/chart` (renders the chart; needs helm), and `pytest -m kind` (installs it on the kind cluster above and checks a run, a Postgres restart, an upgrade, two runs at once, and uninstall plus reinstall).
+
+Clean up: `kind delete cluster --name psc`.
 
 Design notes: [`artifacts/`](artifacts/) (specs, plans and one ADR per decision).
 

@@ -47,3 +47,20 @@ Thresholds are run settings with these defaults, not values in the code.
 
 - Bad data never reaches the output without a record. A failure leaves the previous week's answers in place.
 - The thresholds are judgement calls, and they're easy to tune. In production they become alerts (see the production section of `NOTES.md`).
+
+## Amendment (2026-11-14): freshness and week-on-week completeness
+
+**Context.** The run checks only looked at the file itself. Nothing asked whether the snapshot was recent, newer than what's already published, or much smaller than last week's. The chart as received had exactly this bug: the same fixed-date file every week. The user asked whether completeness and freshness checks were needed.
+
+**Options.** (1) Leave it to monitoring. (2) Check it in the pipeline, against the last published run in `psc_audit.pipeline_run` (status `succeeded`, not a dry run).
+
+**Decision.** Option 2, with one query at the start of a writing run. A dry run has no database, so it skips these checks.
+
+| check_code | Rule | Severity |
+|---|---|---|
+| `snapshot_not_newer` | `snapshot_date` older than the last published run's | error, fails: never replace newer data with older |
+| `snapshot_already_loaded` | same `source_sha256` as the last published run | warning: a rerun is allowed |
+| `snapshot_stale` | `snapshot_date` more than 8 days before the run date | warning |
+| `company_count_drop` | companies down by more than 5% on the last published run | warning; error that fails above 20% |
+
+**Consequences.** The baked-in sample (2026-10-29) is stale on every run after 2026-11-06, so the chart's default run always warns `snapshot_stale` and, from the second run, `snapshot_already_loaded`. That's true and intended. The same date reloaded is allowed, so reruns still publish. "The last succeeded run is too old" is a serving-side alert, so it stays in monitoring (NOTES).

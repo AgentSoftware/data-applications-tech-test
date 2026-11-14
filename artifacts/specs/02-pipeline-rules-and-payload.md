@@ -140,6 +140,7 @@ These go in `data_issue` with no line, and are summarised in `pipeline_run`:
 | check_code | sev | fails run |
 |---|---|---|
 | input_missing | E | always |
+| run_in_progress | E | always: another writing run holds the Postgres advisory lock (added 2026-11-14, plan 03) |
 | trailer_missing | E | always |
 | trailer_count_mismatch | W or E | E (fails) if the gap is more than 0.1% for any of psc, statement or exemption; W if it's non-zero but within that |
 | malformed_share_exceeded | E | always (it's the run-level form of malformed_json) |
@@ -147,6 +148,10 @@ These go in `data_issue` with no line, and are summarised in `pipeline_run`:
 | unfollowed_share_high | W | – (more than 15% of active corporate links not followed) |
 | unreachable_serving_key | E | always |
 | empty_output | E | always |
+| snapshot_not_newer | E | always: snapshot_date older than the last published run's (ADR 0012 amendment) |
+| snapshot_already_loaded | W | – (same source_sha256 as the last published run) |
+| snapshot_stale | W | – (snapshot_date more than 8 days before the run date) |
+| company_count_drop | W or E | E (fails) if companies drop more than 20% on the last published run; W above 5% |
 
 **Reconciliation**, for each kind group (psc, statement, exemption):
 

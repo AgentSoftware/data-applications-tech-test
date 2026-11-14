@@ -10,7 +10,7 @@ requires-python = ">=3.11"
 dependencies = ["psycopg[binary]>=3.1"]
 
 [project.optional-dependencies]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "pyyaml>=6"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
@@ -20,5 +20,8 @@ psc_pipeline = ["sql/*.sql"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-markers = ["integration: needs a running Postgres (docker compose up -d postgres)"]
-addopts = "-m 'not integration'"
+markers = [
+    "integration: needs a running Postgres (docker compose up -d postgres)",
+    "kind: installs the chart on a local kind cluster (slow; see tests/chart/test_kind.py)",
+]
+addopts = "-m 'not integration and not kind'"

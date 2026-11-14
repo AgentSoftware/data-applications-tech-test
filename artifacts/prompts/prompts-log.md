@@ -229,3 +229,50 @@ I've started the Docker Desktop and the database looks good, it contains sample 
 
 This may or may not be related to the current task.</ide_selection>
 perfect , yes
+
+## 2026-11-14 15:03:05 GMT  (session `470d1bfc`)
+
+<ide_opened_file>The user opened the file /Users/shiko/repos/me_streetgp_20261113/data-applications-tech-test/src/psc_pipeline/sql/audit.sql in the IDE. This may or may not be related to the current task.</ide_opened_file>
+yes
+
+## 2026-11-14 15:32:51 GMT  (session `470d1bfc`)
+
+<ide_selection>The user selected the lines 25 to 25 from /Users/shiko/repos/me_streetgp_20261113/data-applications-tech-test/kubernetes/helm/psc-pipeline/templates/cronjob.yaml:
+restartPolicy
+
+This may or may not be related to the current task.</ide_selection>
+I created PR 
+1- should i create a new branch for part 2? give that this branch names (part-1) or keep working on it and create a new PR at the end of the task ?
+2- that's my first time work with Helm , give me overview and what are most important things I should know and config i have to know to review and fix it, how can i config it for this pipeline (make sure that data persistent at any cluster fail, not concurrency runs  or best practices for this type of pipelines , without fancy features handling secrets and  input and output data
+
+## 2026-11-14 15:52:09 GMT  (session `470d1bfc`)
+
+<ide_opened_file>The user opened the file /Users/shiko/repos/me_streetgp_20261113/data-applications-tech-test/artifacts/prompts/prompts-log.md in the IDE. This may or may not be related to the current task.</ide_opened_file>
+yes , go ahead
+
+## 2026-11-14 15:53:00 GMT  (session `470d1bfc`)
+
+<task-notification>
+<task-id>bvtrmjqkd</task-id>
+<tool-use-id>toolu_0156zAQAjAET35MxdqPzdaEz</tool-use-id>
+<output-file>/private/tmp/claude-501/-Users-shiko-repos-me-streetgp-20261113-data-applications-tech-test/470d1bfc-26f4-4033-b4a1-c9d950aab335/tasks/bvtrmjqkd.output</output-file>
+<status>completed</status>
+<summary>Background command "Install helm and kind with Homebrew" completed (exit code 0)</summary>
+</task-notification>
+
+## 2026-11-14 16:31:47 GMT  (session `470d1bfc`)
+
+<ide_opened_file>The user opened the file /Users/shiko/repos/me_streetgp_20261113/data-applications-tech-test/REVIEW.md in the IDE. This may or may not be related to the current task.</ide_opened_file>
+Good, before commiting
+1- Let me know if you had to make any temporary or unreliable fixes (dodgy)
+2- what tests did you implement ? how can i validate it ? 
+3- are there any completeness or/and freshness tests needed ?
+
+## 2026-11-14 16:37:09 GMT  (session `470d1bfc`)
+
+yes, go ahead
+
+## 2026-11-14 16:47:28 GMT  (session `470d1bfc`)
+
+<ide_opened_file>The user opened the file /Users/shiko/repos/me_streetgp_20261113/data-applications-tech-test/NOTES.md in the IDE. This may or may not be related to the current task.</ide_opened_file>
+yes

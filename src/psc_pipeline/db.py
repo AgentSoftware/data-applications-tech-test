@@ -29,6 +29,7 @@ COLUMNS = {
 ISSUE_COLUMNS = ["run_id", "check_code", "severity", "action", "source_line", "company_number", "field_name",
                  "raw_value", "fixed_value", "details"]
 JSON_COLUMNS = {"exemption_details", "payload", "details"}
+RUN_LOCK = 7_301_001  # pg advisory lock key: one writing run at a time, however it was started
 
 
 def connect():
@@ -50,6 +51,21 @@ def start_run(conn, source_file, sha256, dry_run) -> int:
         run_id = cur.fetchone()[0]
     conn.commit()
     return run_id
+
+
+def try_lock(conn) -> bool:
+    """Session lock, held until the connection closes; a second run gets False straight away."""
+    got = conn.execute("SELECT pg_try_advisory_lock(%s)", (RUN_LOCK,)).fetchone()[0]
+    conn.commit()
+    return got
+
+
+def last_published(conn):
+    """The last run that published (succeeded, not a dry run), or None."""
+    row = conn.execute("""SELECT snapshot_date, source_sha256, company_count FROM psc_audit.pipeline_run
+                          WHERE run_status = 'succeeded' AND NOT dry_run ORDER BY run_id DESC LIMIT 1""").fetchone()
+    conn.commit()
+    return dict(zip(("snapshot_date", "source_sha256", "company_count"), row)) if row else None
 
 
 def finish_run(conn, run_id, status, failure_reason, parsed, company_count, issues):

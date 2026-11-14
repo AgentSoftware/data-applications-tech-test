@@ -1,5 +1,6 @@
 """Serving payload per company, run checks and summary. Rules: spec 02 sections 3.4, 5, 6; ADRs 0003, 0004, 0007, 0012."""
 from collections import Counter, defaultdict
+from datetime import date, timedelta
 
 from .normalise import normalise_number
 from .parse import Issue
@@ -115,12 +116,18 @@ def control_status(level0) -> str:
 MAX_MALFORMED_SHARE = 0.001     # fail above 0.1% of lines
 MAX_TRAILER_GAP_SHARE = 0.001   # fail above 0.1% of a trailer count; warn on any gap
 MAX_UNFOLLOWED_SHARE = 0.15     # warn above 15% of active corporate links
+MAX_SNAPSHOT_AGE_DAYS = 8      # warn if the snapshot is older than this on the run date
+WARN_COMPANY_DROP = 0.05        # vs the last published run: warn above 5% fewer companies,
+MAX_COMPANY_DROP = 0.20         # fail above 20%
 TRAILER_KEYS = {"psc": "persons_of_significant_control_count", "statement": "statements_count",
                 "exemption": "exemptions_count"}
 
 
-def run_checks(parsed, links, payloads, issues) -> list[str]:
-    """Adds run-level issues; returns the check codes that fail the run."""
+def run_checks(parsed, links, payloads, issues, previous=None, sha256=None, today=None) -> list[str]:
+    """Adds run-level issues; returns the check codes that fail the run.
+
+    previous: the last published run ({snapshot_date, source_sha256, company_count}) or None (first run, dry run).
+    """
     failed = []
 
     def add(code, severity, fails=False, **details):
@@ -154,6 +161,20 @@ def run_checks(parsed, links, payloads, issues) -> list[str]:
         add("unreachable_serving_key", "error", True, examples=bad_keys[:10], count=len(bad_keys))
     if not payloads:
         add("empty_output", "error", True)
+
+    snap = parsed.snapshot_date
+    if snap and (today or date.today()) - snap > timedelta(days=MAX_SNAPSHOT_AGE_DAYS):
+        add("snapshot_stale", "warning", snapshot_date=snap.isoformat(), run_date=(today or date.today()).isoformat())
+    if previous:
+        if snap and previous["snapshot_date"] and snap < previous["snapshot_date"]:
+            add("snapshot_not_newer", "error", True, snapshot_date=snap.isoformat(),
+                published_snapshot_date=previous["snapshot_date"].isoformat())
+        if sha256 and sha256 == previous["source_sha256"]:
+            add("snapshot_already_loaded", "warning", source_sha256=sha256)
+        before, now = previous["company_count"] or 0, len(payloads)
+        if before and now < before * (1 - WARN_COMPANY_DROP):
+            too_big = now < before * (1 - MAX_COMPANY_DROP)
+            add("company_count_drop", "error" if too_big else "warning", too_big, published=before, now=now)
     return failed
 
 

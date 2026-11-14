@@ -32,7 +32,7 @@ def sha256(path) -> str:
     return h.hexdigest()
 
 
-def process(path):
+def process(path, previous=None, source_sha256=None):
     """Everything except the database: returns (parsed, tables, issues, failed check codes)."""
     parsed = parse_file(path)
     issues = parsed.issues
@@ -40,7 +40,7 @@ def process(path):
     links = classify_links(parsed.psc, companies, issues)
     ancestors = build_ancestors(companies, owner_map(links), issues)
     payloads, statuses = build_payloads(parsed, links, ancestors, issues)
-    failed = run_checks(parsed, links, payloads, issues)
+    failed = run_checks(parsed, links, payloads, issues, previous, source_sha256)
     tables = {
         "company": [{"company_number": c, "control_status": s} for c, s in sorted(statuses.items())],
         "psc": parsed.psc, "psc_statement": parsed.statements, "psc_exemption": parsed.exemptions,
@@ -53,12 +53,19 @@ def process(path):
 def main(argv=None) -> int:
     args = parse_args(argv)
     path = Path(args.input)
-    conn = run_id = None
+    conn = run_id = previous = None
     try:
+        source_sha256 = sha256(path) if path.is_file() else None
         if not args.dry_run:
             from . import db  # psycopg is only needed when writing
             conn = db.connect()
-            run_id = db.start_run(conn, str(path), sha256(path) if path.is_file() else None, args.dry_run)
+            run_id = db.start_run(conn, str(path), source_sha256, args.dry_run)
+            if not db.try_lock(conn):
+                db.finish_run(conn, run_id, "failed", "run_in_progress", None, None,
+                              [Issue("run_in_progress", "error", "rejected")])
+                print("PSC pipeline: FAILED (another run is in progress)", file=sys.stderr)
+                return 1
+            previous = db.last_published(conn)
 
         if not path.is_file() or path.stat().st_size == 0:
             issues = [Issue("input_missing", "error", "rejected", details={"path": str(path)})]
@@ -67,7 +74,7 @@ def main(argv=None) -> int:
             print(f"PSC pipeline: FAILED (input missing or empty: {path})", file=sys.stderr)
             return 1
 
-        parsed, tables, issues, failed = process(path)
+        parsed, tables, issues, failed = process(path, previous, source_sha256)
         published = False
         if conn:
             if not failed:

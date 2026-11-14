@@ -81,3 +81,19 @@ helm test psc
 
 1. helm and kind with Homebrew: yes.
 2. Baked-in sample as the default input, with the download as an opt-in: yes.
+
+## 6. Build notes (2026-11-14)
+
+- Installing the chart as received on kind confirmed #1–#4. It also corrected two guesses in the first draft: the fixed URL does exist today (a 2.4 GB zip holding a 13.9 GB `.txt` with the expected name), so #6 is a "from the second week" blocker about the date, the disk and the size, not a wrong file name.
+- The subchart's values can't be templated from the parent chart, so the Secret has a fixed name (`database.secretName`, default `psc-db`), repeated in `postgres.settings/userDatabase.existingSecret`. secret.yaml fails the render if they differ.
+- The Secret is kept on uninstall (`helm.sh/resource-policy: keep`). Without that, a reinstall would generate a new password that doesn't match the kept Postgres volume.
+- The ConfigMap template was removed, not fixed: plain env vars plus `secretKeyRef` are simpler.
+- The download path was tested with a zip of the sample served from the host (`host.docker.internal`), not a real Companies House download.
+
+## 7. Follow-up approved 2026-11-14 (after the "anything dodgy?" questions)
+
+1. **Subchart 1.1.8 → 1.4.12.** It ships Postgres 16.14, the same major version as Compose and the tests, so there's no image override on a chart built for 13. The value keys are unchanged (checked by diffing the two `values.yaml` files).
+2. **Wait for Postgres with `pg_isready`** (postgres image) instead of a TCP check with `nc`.
+3. **Notes on the limits:** `lookup` and GitOps renders (set a password or `existingSecret`); one release per namespace (fixed Secret name); `postgres.fullnameOverride` isn't supported; bump the image tag on each build.
+4. **Chart tests in the repo:** `tests/chart/test_render.py` (pytest, `helm template`, skips without helm; PyYAML added to the dev extra) and `tests/chart/test_kind.py` (marker `kind`, opt-in), which replays the manual kind checks.
+5. **Freshness and completeness checks** in the pipeline: ADR 0012 amendment. `snapshot_not_newer`, `snapshot_already_loaded`, `snapshot_stale`, `company_count_drop`, all in `run_checks`, with unit tests. `db.last_published()` reads the last published run.

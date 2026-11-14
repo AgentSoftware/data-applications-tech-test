@@ -1,15 +1,31 @@
+# helm test: passes once a run has published (psc.psc_by_company has rows).
 apiVersion: v1
 kind: Pod
 metadata:
-  name: "{{ include "psc-pipeline.fullname" . }}-test-connection"
+  name: "{{ include "psc-pipeline.fullname" . }}-test-output"
   labels:
     {{- include "psc-pipeline.labels" . | nindent 4 }}
   annotations:
     "helm.sh/hook": test
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
 spec:
-  containers:
-    - name: wget
-      image: busybox
-      command: ['wget']
-      args: ['{{ include "psc-pipeline.fullname" . }}:{{ .Values.service.port }}']
   restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: psql
+      image: {{ .Values.job.postgresClientImage }}
+      command:
+        - sh
+        - -c
+        - >-
+          n=$(psql -tAc "SELECT count(*) FROM psc.psc_by_company") &&
+          echo "psc_by_company rows: $n" && [ "$n" -gt 0 ]
+      env:
+        {{- include "psc-pipeline.dbEnv" . | nindent 8 }}
+      securityContext:
+        {{- toYaml .Values.securityContext | nindent 8 }}
