@@ -62,8 +62,32 @@ Create the name of the service account to use
 {{- end }}
 
 {{/*
-The connection string the pipeline uses to write its results to PostgreSQL.
+PostgreSQL host: database.host, or the bundled subchart's Service (same naming rule as its "postgres.fullname").
 */}}
-{{- define "psc-pipeline.databaseUrl" -}}
-postgresql://{{ .Values.postgres.auth.username }}:{{ .Values.postgres.auth.password }}@postgres:5432/{{ .Values.postgres.auth.database }}
+{{- define "psc-pipeline.dbHost" -}}
+{{- if .Values.database.host }}
+{{- .Values.database.host }}
+{{- else if not .Values.postgres.enabled }}
+{{- fail "set database.host when postgres.enabled is false" }}
+{{- else if contains "postgres" .Release.Name }}
+{{- .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- else }}
+{{- printf "%s-postgres" .Release.Name | trunc 63 | trimSuffix "-" }}
+{{- end }}
+{{- end }}
+
+{{/*
+Connection settings as libpq PG* variables. The password comes from the Secret, never a ConfigMap or URL.
+*/}}
+{{- define "psc-pipeline.dbEnv" -}}
+- name: PGHOST
+  value: {{ include "psc-pipeline.dbHost" . | quote }}
+- name: PGPORT
+  value: {{ .Values.database.port | quote }}
+- name: PGDATABASE
+  valueFrom: {secretKeyRef: {name: {{ .Values.database.secretName }}, key: POSTGRES_DB}}
+- name: PGUSER
+  valueFrom: {secretKeyRef: {name: {{ .Values.database.secretName }}, key: USERDB_USER}}
+- name: PGPASSWORD
+  valueFrom: {secretKeyRef: {name: {{ .Values.database.secretName }}, key: USERDB_PASSWORD}}
 {{- end }}

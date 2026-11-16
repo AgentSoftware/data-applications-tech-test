@@ -1,0 +1,9 @@
+.git
+.venv
+.claude
+exploration
+artifacts
+kubernetes
+tests
+**/__pycache__
+*.egg-info

@@ -6,12 +6,27 @@ metadata:
     {{- include "psc-pipeline.labels" . | nindent 4 }}
 spec:
   schedule: {{ .Values.schedule | quote }}
+  timeZone: {{ .Values.timeZone | quote }}
   concurrencyPolicy: {{ .Values.job.concurrencyPolicy }}
+  startingDeadlineSeconds: {{ .Values.job.startingDeadlineSeconds }}
   successfulJobsHistoryLimit: {{ .Values.job.successfulJobsHistoryLimit }}
   failedJobsHistoryLimit: {{ .Values.job.failedJobsHistoryLimit }}
   jobTemplate:
     spec:
       backoffLimit: {{ .Values.job.backoffLimit }}
+      activeDeadlineSeconds: {{ .Values.job.activeDeadlineSeconds }}
+      podFailurePolicy:
+        rules:
+          # Exit 1: a data check failed (or another run holds the lock). The same input fails the same way: stop.
+          - action: FailJob
+            onExitCodes:
+              containerName: pipeline
+              operator: In
+              values: [1]
+          # Evicted or preempted pods don't count as a try.
+          - action: Ignore
+            onPodConditions:
+              - type: DisruptionTarget
       template:
         metadata:
           {{- with .Values.podAnnotations }}
@@ -22,7 +37,9 @@ spec:
             {{- include "psc-pipeline.labels" . | nindent 12 }}
         spec:
           serviceAccountName: {{ include "psc-pipeline.serviceAccountName" . }}
-          restartPolicy: OnFailure
+          automountServiceAccountToken: false
+          # Never: each try is a new pod, so its logs are kept (OnFailure restarts in place).
+          restartPolicy: Never
           {{- with .Values.imagePullSecrets }}
           imagePullSecrets:
             {{- toYaml . | nindent 12 }}
@@ -30,49 +47,75 @@ spec:
           securityContext:
             {{- toYaml .Values.podSecurityContext | nindent 12 }}
           initContainers:
-            # Download and unzip the latest snapshot before the pipeline starts.
+            {{- if .Values.input.download.enabled }}
+            # Fetch and unzip the snapshot into the scratch volume; fail if the expected file is not there.
             - name: download-snapshot
-              image: busybox:latest
+              image: busybox:1.36
               command:
                 - sh
                 - -c
                 - >-
-                  wget -O /data/snapshot.zip {{ .Values.pipeline.sourceUrl }} &&
-                  unzip /data/snapshot.zip -d /data
+                  set -e;
+                  wget -q -O /input/snapshot.zip "$SOURCE_URL";
+                  unzip -o -q /input/snapshot.zip -d /input;
+                  rm /input/snapshot.zip;
+                  test -s "$INPUT_PATH" || { echo "missing $INPUT_PATH after unzip"; ls -l /input; exit 1; }
+              env:
+                - name: SOURCE_URL
+                  value: {{ required "input.download.url is required when input.download.enabled" .Values.input.download.url | quote }}
+                - name: INPUT_PATH
+                  value: {{ .Values.input.path | quote }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
               volumeMounts:
-                - name: data
-                  mountPath: /data
-            # Wait until PostgreSQL accepts connections before the pipeline starts.
+                - name: input
+                  mountPath: /input
+            {{- end }}
+            # Wait until PostgreSQL accepts connections (pg_isready), but not forever.
             - name: wait-for-postgres
-              image: busybox:latest
-              command: ["sh", "-c", "until nc -z postgres 5432; do echo waiting for postgres; sleep 2; done"]
+              image: {{ .Values.job.postgresClientImage }}
+              command:
+                - sh
+                - -c
+                - >-
+                  end=$(( $(date +%s) + {{ .Values.job.waitForDatabaseSeconds }} ));
+                  until pg_isready -q; do
+                  [ "$(date +%s)" -lt "$end" ] || { echo "postgres $PGHOST:$PGPORT not ready"; exit 1; };
+                  echo "waiting for $PGHOST:$PGPORT"; sleep 2; done
+              env:
+                {{- include "psc-pipeline.dbEnv" . | nindent 16 }}
+              securityContext:
+                {{- toYaml .Values.securityContext | nindent 16 }}
           containers:
             - name: pipeline
               image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
               imagePullPolicy: {{ .Values.image.pullPolicy }}
-              command: {{ toJson .Values.pipeline.command }}
-              args: {{ toJson .Values.pipeline.args }}
-              envFrom:
-                - configMapRef:
-                    name: {{ include "psc-pipeline.fullname" . }}-config
+              args: ["--input", {{ .Values.input.path | quote }}]
               env:
+                {{- include "psc-pipeline.dbEnv" . | nindent 16 }}
                 - name: PSC_DRY_RUN
-                  value: {{ .Values.pipeline.dryRun }}
+                  value: {{ .Values.pipeline.dryRun | quote }}
               securityContext:
                 {{- toYaml .Values.securityContext | nindent 16 }}
               resources:
                 {{- toYaml .Values.resources | nindent 16 }}
               volumeMounts:
-                - name: data
-                  mountPath: /data
+                - name: tmp
+                  mountPath: /tmp
+                {{- if .Values.input.download.enabled }}
+                - name: input
+                  mountPath: /input
+                  readOnly: true
+                {{- end }}
           volumes:
-            - name: data
-              {{- if .Values.persistence.enabled }}
-              persistentVolumeClaim:
-                claimName: {{ include "psc-pipeline.fullname" . }}-data
-              {{- else }}
+            - name: tmp
               emptyDir: {}
-              {{- end }}
+            {{- if .Values.input.download.enabled }}
+            # Scratch space for this run only: the input is fetched fresh each week, so no PVC.
+            - name: input
+              emptyDir:
+                sizeLimit: {{ .Values.input.download.sizeLimit }}
+            {{- end }}
           {{- with .Values.nodeSelector }}
           nodeSelector:
             {{- toYaml . | nindent 12 }}

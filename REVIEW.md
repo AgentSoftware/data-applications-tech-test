@@ -1,7 +1,85 @@
 # Review: `kubernetes/helm/psc-pipeline`
 
-<!-- Review the chart as you received it, as you would review a teammate's pull request. For each problem, say what is wrong, how much it matters, and what you changed. Include the problems you chose not to fix, and say why. Use the table below or any format you prefer. -->
+This reviews the chart as received (commit `fork/main`), as I would review a teammate's pull request. I read the rendered output (`helm template`) and the subchart's own source (groundhog2k `postgres` 1.1.8), not only the templates. Then I installed it unchanged on a local kind cluster:
 
-| Problem | Where | How much it matters | What I changed |
-|---|---|---|---|
-| | | | |
+- `helm install` fails: `env[name="PSC_DRY_RUN"].value: expected string` (#1).
+- With only that patched in a scratch copy: `psc-postgres-0` goes into `CrashLoopBackOff` ("superuser password is not specified", #2), the job's wait loop prints `nc: bad address 'postgres'` forever (#3), and the ConfigMap is created in `default` while everything else is in the release namespace (#4).
+
+**Verdict: request changes.** The chart can't run as written. Six separate problems each stop it: Kubernetes rejects the manifest, Postgres doesn't start, the job waits for a host that doesn't exist, the ConfigMap is missing outside the `default` namespace, the image can't be pulled, and the input is unreliable. Beyond those, it gives the pipeline cluster-admin and a privileged root container, stores passwords in plain text, allows two runs at once, and keeps the database on a disk that is gone after any restart.
+
+Severity: **blocker** = install or run fails; **high** = security risk, or data loss or corruption; **medium** = wrong in some cases; **low** = tidiness.
+
+| # | Problem | Where | How much it matters | What I changed |
+|---|---|---|---|---|
+| 1 | `PSC_DRY_RUN` renders as `value: false`, a YAML boolean. An env value must be a string, so the API server rejects the CronJob and `helm install` fails. | `cronjob.yaml` | blocker | Quoted (`| quote`). |
+| 2 | The `postgres:` values use **Bitnami** key names (`auth.username`, `auth.password`, `auth.database`, `auth.postgresPassword`, `primary.persistence`). The dependency is groundhog2k's chart, which uses `settings.superuserPassword.value`, `userDatabase.{name,user,password}.value` and `storage.requestedSize`. Helm ignores unknown keys without a warning. So no superuser password is set, the `postgres` image refuses to start without one, and no `psc` user or database would be created anyway. | `values.yaml` | blocker | Rewrote the `postgres:` values with groundhog2k's keys. The superuser and user credentials come from one Secret (`settings.existingSecret`, `userDatabase.existingSecret`); the subchart creates the `psc` user as owner of the `psc` database. |
+| 3 | The database host is hardcoded as `postgres`, in the URL, in the wait loop and in NOTES. The subchart's Service is called `<release>-postgres` (for example `psc-postgres`). The `wait-for-postgres` loop has no time limit, so the pod sits in `Init` forever. | `_helpers.tpl`, `cronjob.yaml`, `NOTES.txt` | blocker | New helper `psc-pipeline.dbHost`: `database.host` if set, otherwise the subchart's Service name, using the same naming rule as the subchart. It fails at render time if neither is available. The wait step now uses `pg_isready` (from the postgres image) instead of a TCP check, and has a time limit (`job.waitForDatabaseSeconds`, 300 s). Don't set `postgres.fullnameOverride`: the helper can't see it (noted in values.yaml). |
+| 4 | The ConfigMap hardcodes `namespace: default`, while everything else goes to the release namespace. With `-n anything-else`, `envFrom` can't find it and the pod fails with `CreateContainerConfigError`. | `configmap.yaml` | blocker | Removed the ConfigMap. The connection settings are now plain `PG*` env vars plus `secretKeyRef`, all in the release namespace. Tested in a non-default namespace (`psc`). |
+| 5 | The image is `psc-pipeline:latest` with `pullPolicy: Always`. The name isn't in any registry, and `Always` stops a locally loaded image (kind, minikube) from being used. Result: `ImagePullBackOff`. `latest` also means you can't tell which code ran. | `values.yaml`, `Chart.yaml` | blocker | Tag `0.1.0` (Chart `appVersion` too), `pullPolicy: IfNotPresent`. README: `docker build` plus `kind load docker-image`. In a real cluster you push to a registry and set `image.repository`. |
+| 6 | The input only works for one week. The URL and `--input` both have a fixed date (`2026-10-29`), so every later run reloads that same old snapshot, or fails once Companies House removes the file. The download really works today: on kind it fetched a 2.4 GB zip holding `persons-with-significant-control-snapshot-2026-10-29.txt` (13.9 GB). But the zip is never deleted, so each run needs about 16.3 GB of disk, and nothing checks that the file is complete or recent. The pipeline also isn't built for the full snapshot: it holds the parsed records in memory (214 MB for the 48k-line sample, so tens of GB for 16 million records). | `cronjob.yaml`, `values.yaml` | blocker (from the second week) | ADR 0014. The default input is the sample baked into the image, so an install runs and writes its output with no network. The download is opt-in (`input.download.enabled`, `url`, `path`), goes to an `emptyDir` capped by `sizeLimit`, deletes the zip, and fails if `input.path` isn't there after unzip. Tested on kind with a served zip, both the right file name and a wrong one. The weekly date and the full size are left to the production design (see below). |
+| 7 | The ServiceAccount is bound to the **`cluster-admin` ClusterRole** across the whole cluster. The comment says the pipeline "reads its configuration from the cluster". It doesn't: it never calls the Kubernetes API. Anyone who can run code in this pod, for example through a malicious input or a compromised image, owns the cluster. | `clusterrolebinding.yaml` | high | Deleted the ClusterRoleBinding. The ServiceAccount has no permissions, and `automountServiceAccountToken: false` on it and on the pod. |
+| 8 | The container runs `privileged: true` as `runAsUser: 0`. Writing to a volume doesn't need either. Privileged mode turns off almost all container isolation (host devices, every capability). Our image is built to run as uid 10001. | `values.yaml` | high | Pod: `runAsNonRoot`, uid/gid/fsGroup 10001, seccomp `RuntimeDefault`. Containers: no privilege escalation, `readOnlyRootFilesystem` (with an `emptyDir` at `/tmp`), all capabilities dropped. The init containers and the test pod use the same settings. |
+| 9 | Passwords are in plain text in `values.yaml` (`psc-password-123`, `postgres`). The full `DATABASE_URL`, password included, is in a **ConfigMap**, which is meant for non-secret settings and is readable by anyone who can read ConfigMaps. The values file also ends up in Helm's release history. | `values.yaml`, `configmap.yaml`, `_helpers.tpl` | high | ADR 0015. One Secret (`database.secretName`), generated with random passwords unless they're set; `lookup` keeps them across upgrades. `lookup` sees nothing under `helm template`, so with a GitOps tool that renders that way (Argo CD), set `database.password` or bring your own Secret; values.yaml says so. The Secret name is fixed (subchart values can't be templated), so it's one release per namespace. It carries `helm.sh/resource-policy: keep`, because the Postgres PVC outlives an uninstall and the password must still match it. The pipeline gets `PGPASSWORD` with `secretKeyRef`; no URL anywhere. `database.createSecret: false` brings your own. Tested on kind: the same password after an upgrade and after uninstall plus reinstall. |
+| 10 | `concurrencyPolicy: Allow`. If a run is late or slow and the next one starts, both build `psc_staging` and swap schemas at the same time and break each other. A manual `kubectl create job --from=cronjob/...` (which NOTES recommends) bypasses any CronJob policy anyway. | `values.yaml` | high | `Forbid`. And in the pipeline (`db.try_lock`), a Postgres advisory lock for the whole run: a second run exits 1 with `run_in_progress` in the audit. Tested on kind with two manual jobs at once: one published, the other failed straight away with `run_in_progress`. |
+| 11 | Postgres persistence is turned off ("the pipeline rebuilds the tables on every run"). That's not true. The published tables are rebuilt, but `psc_audit` (run history and every data issue) isn't. And after any Postgres pod restart, eviction or node drain, the service has **no data until next week's run**. (The `primary.persistence` key is also a Bitnami key, so it does nothing; see #2. groundhog2k's chart also defaults to no volume.) | `values.yaml` | high | `postgres.storage.requestedSize: 2Gi` (the StatefulSet's PVC). Tested on kind: deleted the Postgres pod, and all 29,125 rows were still there. See "What survives what". |
+| 12 | `restartPolicy: OnFailure` with `backoffLimit: 10`. When the data checks fail, the pipeline exits 1, and the same input fails the same way every time. So it is restarted 10 times, each try adds a failed run to the audit, and because the container restarts in the same pod, earlier logs are lost. `OnFailure` also re-runs the download init container. | `cronjob.yaml`, `values.yaml` | medium | `restartPolicy: Never` (one pod per try, so logs are kept), `backoffLimit: 2`, and a `podFailurePolicy`: exit 1 from the pipeline → `FailJob`; eviction or preemption doesn't count as a try. Tested: the locked-out job failed with reason `PodFailurePolicy` after 1 pod. |
+| 13 | No `activeDeadlineSeconds` and no `startingDeadlineSeconds`. A hung run (see the endless wait loop in #3) never ends. With a `Forbid` policy, it would then block every later week. | `cronjob.yaml` | medium | `activeDeadlineSeconds: 3600` and `startingDeadlineSeconds: 21600` (a missed schedule can start up to 6 hours late). |
+| 14 | No resource requests or limits. The scheduler can put the pod on a full node, and a memory spike can take the node down instead of only the pod. I measured the pipeline on the sample at a 214 MB peak. | `values.yaml` | medium | Requests 250m CPU / 256Mi, limit 512Mi, from the measured 214 MB. Postgres gets requests and a limit too. |
+| 15 | Images aren't pinned (`busybox:latest`, the pipeline at `latest`). The subchart's default Postgres is **13.22**, which went end of life in Nov 2025, while the pipeline is built and tested on 16. | `cronjob.yaml`, `values.yaml` | medium | `busybox:1.36`, pipeline `0.1.0`. Subchart upgraded from 1.1.8 to **1.4.12**, whose default is Postgres **16.14**: the same major version as Compose and the tests, with no image override on a chart built for 13. The value keys are unchanged (I diffed the two `values.yaml` files). `kubeVersion: >=1.27` in Chart.yaml, for `timeZone` and `podFailurePolicy`. |
+| 16 | The `helm test` pod runs `wget` against `<fullname>:80` (`.Values.service.port`). There is no Service, because this isn't a web app, so `helm test` always fails and tests nothing useful. | `templates/tests/test-connection.yaml` | medium | Replaced it with a `psql` pod that passes when `psc.psc_by_company` has rows. Passes on kind after a run. |
+| 17 | The 50Gi `ReadWriteOnce` PVC always exists, only to hold a download that is used once. It costs money every week, and a RWO disk ties every run to the node that holds it. | `pvc.yaml`, `values.yaml` | low | Removed the PVC. A download uses an `emptyDir` that lasts only for that run. |
+| 18 | Leftover values from the web-app template: `replicaCount`, `service`, `ingress`, `autoscaling`. `LOG_LEVEL` isn't read by the pipeline. Leftovers mislead the next reader. | `values.yaml`, `configmap.yaml` | low | Removed `replicaCount`, `service`, `ingress`, `autoscaling` and `LOG_LEVEL`. |
+| 19 | The schedule comment ("after Companies House publishes the new snapshot") has no source, and without `timeZone` the time depends on the controller's clock. | `values.yaml` | low | Schedule Friday 06:00 with `timeZone: Etc/UTC`, and an honest comment: there's no fixed publish time, so check the snapshot date. The run records it (`pipeline_run.snapshot_date`). |
+| 20 | NOTES.txt gives the wrong Service name, and a `psql` line with no password, so neither works. | `NOTES.txt` | low | Rewrote NOTES: start and follow a run, `helm test`, read the password from the Secret, port-forward to the real Service, look up one company, and what the PVC does and doesn't protect. |
+| 21 | `Chart.lock` is committed but `charts/` isn't, so `helm install` from a clean clone fails until you run `helm repo add groundhog2k https://groundhog2k.github.io/helm-charts/` and `helm dependency build`. Neither step is documented. | `Chart.yaml`, README | low | README "Deploy with the chart" lists `helm repo add` and `helm dependency build`. `charts/*.tgz` stays git-ignored. |
+
+## What survives what
+
+This was asked for in review: does the data survive a failure? With the chart as received, the answer is no. There's no volume, so **any** Postgres restart loses everything. After the fixes:
+
+| Failure | Published data (`psc`) | Run history (`psc_audit`) |
+|---|---|---|
+| Pipeline pod fails mid-run | kept: the swap is one transaction, so the last good data stays | kept, plus a `failed` row |
+| Postgres pod restarts | kept (PVC) | kept (PVC) |
+| Node lost | kept if the storage class is network-attached (GKE Persistent Disk); lost on kind's node-local disk | same |
+| `helm uninstall` | the StatefulSet's PVC is not deleted by Helm, so it's kept | same |
+| Cluster lost | lost, but it can be rebuilt by re-running the job on the snapshot | **lost**: needs backups or managed Postgres (not in this chart) |
+
+## Not fixed, and why
+
+| Item | Why not |
+|---|---|
+| Finding the latest snapshot automatically each week, and loading the full 16M records | It needs a different design: streaming, or Dataflow writing to BigQuery, instead of one in-memory Python process. That's the production write-up in NOTES.md. The chart takes any URL and file name as values, so a weekly job can set them. |
+| Backups, HA or managed PostgreSQL | A bundled single Postgres is right for this exercise. In production this would be Cloud SQL, with automated backups and point-in-time recovery, and `postgres.enabled: false` with `database.host`, which the chart already supports. |
+| NetworkPolicy | Useful (only the pipeline and the test pod should reach Postgres), but it needs a CNI that enforces it, and kind's default one doesn't, so I couldn't check it. |
+| An external secret manager | ADR 0015: a plain Secret, as asked. `database.createSecret: false` lets External Secrets or Secret Manager provide one with the same keys. |
+| A checksum for the download | Companies House publishes none I could find. The pipeline already checks the file itself: the totals line, malformed share and empty output (ADR 0012), and it records its sha256 in `pipeline_run`. |
+| Upgrading Postgres across a major version | Not needed here, because the chart as received never started Postgres, so no one has 13.x data. A major upgrade needs a dump and restore (or `pg_upgrade`); a minor one (16.4 → 16.14, tested on kind) only logs a collation-version warning, because the newer image has a newer glibc. The pipeline rebuilds the `psc` tables and their indexes every run, so only `psc_audit` would need a `REINDEX`. |
+| Alerting on a failed run | The Job fails (exit 1 or 2), so a cluster-level alert on failed Jobs catches it; `psc_audit.pipeline_run` has the reason. Wiring an alert is platform work, not chart work. |
+
+## Freshness and completeness (added after review)
+
+Fixing #6 showed a gap in the pipeline itself: nothing noticed the same old file loaded every week. Each writing run now compares itself with the last published run in `psc_audit.pipeline_run` (ADR 0012 amendment):
+- `snapshot_not_newer`: older than what's published → **fail**.
+- `snapshot_already_loaded`: same sha256 → warning.
+- `snapshot_stale`: more than 8 days old → warning.
+- `company_count_drop`: down more than 5% → warning; more than 20% → **fail**.
+
+So the chart's default sample now warns `snapshot_stale` on every run, which is true.
+
+## How I checked the fixed chart
+
+In the repo:
+- `tests/chart/test_render.py`: 18 tests on `helm template`, one or more per finding. All 18 fail on the chart as received and pass on the fixed one.
+- `tests/chart/test_kind.py` (`pytest -m kind`): installs on kind and replays steps 1–5 below. 5 tests, all pass.
+
+By hand first:
+
+`helm lint`, then `helm template` for the default, the download, the external database and the misconfigured cases (each fails with a clear message). Then on kind (Kubernetes from kind v0.33):
+
+1. Install into the `psc` namespace, then a manual job: run 1 published 29,125 companies, all fail rules passed; `helm test` passed.
+2. Deleted the Postgres pod: the data was still there.
+3. `helm upgrade`: the same password.
+4. Two jobs at once: one published, the other failed at once with `run_in_progress` (reason `PodFailurePolicy`, 1 pod).
+5. Uninstall: the PVC and Secret were kept. Reinstall: the same password, the old data still served, and run 4 published again. `04555610`: `ok`, 23 levels.
+6. Download: served a zip of the sample; run published. A wrong `input.path`: the init container failed with "missing … after unzip", and the pipeline never started.

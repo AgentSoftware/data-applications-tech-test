@@ -1,12 +1,20 @@
-The PSC pipeline is installed.
+The PSC pipeline is installed. It runs on "{{ .Values.schedule }}" ({{ .Values.timeZone }}) and reads {{ .Values.input.path }}.
 
-It runs on the schedule "{{ .Values.schedule }}" and writes its results to PostgreSQL.
+Start a run now and follow it:
 
-To start a run now:
+  kubectl -n {{ .Release.Namespace }} create job --from=cronjob/{{ include "psc-pipeline.fullname" . }} {{ include "psc-pipeline.fullname" . }}-manual
+  kubectl -n {{ .Release.Namespace }} wait --for=condition=complete job/{{ include "psc-pipeline.fullname" . }}-manual --timeout=10m
+  kubectl -n {{ .Release.Namespace }} logs job/{{ include "psc-pipeline.fullname" . }}-manual
 
-  kubectl create job --from=cronjob/{{ include "psc-pipeline.fullname" . }} {{ include "psc-pipeline.fullname" . }}-manual
+Check the output:  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}
 
-To connect to the database:
+Look up one company:
 
-  kubectl port-forward svc/postgres 5432:5432
-  psql "postgresql://{{ .Values.postgres.auth.username }}@localhost:5432/{{ .Values.postgres.auth.database }}"
+  export PGPASSWORD=$(kubectl -n {{ .Release.Namespace }} get secret {{ .Values.database.secretName }} -o jsonpath='{.data.USERDB_PASSWORD}' | base64 -d)
+  kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "psc-pipeline.dbHost" . }} 5432:5432 &
+  psql -h localhost -U {{ .Values.database.user }} -d {{ .Values.database.name }} -c "SELECT jsonb_pretty(payload) FROM psc.psc_by_company WHERE company_number = '04555610'"
+{{- if .Values.postgres.enabled }}
+
+Data: PostgreSQL keeps its data on a PVC, and the Secret {{ .Values.database.secretName }} is kept on uninstall so the
+password still matches it. Neither survives losing the cluster: back up, or use managed PostgreSQL, for that.
+{{- end }}

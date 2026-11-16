@@ -2,10 +2,11 @@ apiVersion: v2
 name: psc-pipeline
 description: Runs the Persons with Significant Control pipeline every week and deploys PostgreSQL to store the results.
 type: application
-version: 0.1.0
-appVersion: "latest"
+version: 0.2.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.27.0-0"  # CronJob timeZone; podFailurePolicy
 dependencies:
   - name: postgres
-    version: 1.1.8
+    version: 1.4.12
     repository: https://groundhog2k.github.io/helm-charts/
     condition: postgres.enabled
